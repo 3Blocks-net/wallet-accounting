@@ -1,0 +1,56 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+
+model Transaction {
+  id             String   @id @default(cuid())
+  source         String   // 'SAFE' | 'BINANCE_DEPOSIT' | 'BINANCE_WITHDRAW'
+  safeAddress    String?
+  binanceType    String?  // 'DEPOSIT' | 'WITHDRAW'
+  txHash         String?  @db.Text
+  fromAddress    String?  @db.Text
+  toAddress      String?  @db.Text
+  assetSymbol    String
+  assetType      String
+  amount         Decimal  @db.Decimal(36, 18)
+  fee            Decimal? @db.Decimal(36, 18)
+  createdAt      DateTime
+  executedAt     DateTime?
+  note           String?  @db.Text
+  matchKey       String?  @db.Text
+  classification TransactionClassification
+
+  @@index([source])
+  @@index([txHash])
+  @@index([matchKey])
+}
+
+enum TransactionClassification {
+  UMBUCHUNG
+  EINZAHLUNG
+  AUSZAHLUNG
+  UNBEKANNT
+}
+
+model WalletBalance {
+  id          String   @id @default(cuid())
+  wallet      String
+  assetSymbol String
+  balance     Decimal  @db.Decimal(36, 18)
+  asOf        DateTime
+
+  @@unique([wallet, assetSymbol, asOf])
+}
