@@ -1,0 +1,52 @@
+export type RawRow = {
+  date: string;
+  wallet_address: string;
+  source_type: string;
+  direction: 'IN' | 'OUT';
+  asset: string;
+  amount: string;
+  fee: string;
+  fee_asset: string;
+  price_usd: string;
+  value_usd: string;
+  price_eur: string;
+  value_eur: string;
+  network: string;
+  from_address: string;
+  to_address: string;
+  tx_hash: string;
+  operation: string;
+  note: string;
+};
+
+export type AggregatedTx = {
+  date: string;
+  txId: string;
+  sourceType: string;
+  kind: 'INTERNAL' | 'PAYMENT' | 'PAYMENT_IN' | 'PAYMENT_OUT' | 'SWAP';
+  network: string;
+  note: string;
+  feeAsset: string | null;
+  feeAmount: string | null;
+  priceUsd: string | null;
+  valueUsd: string | null;
+  priceEur: string | null;
+  valueEur: string | null;
+  feePayerAddress: string | null;
+  feePayer: string | null;
+  transfers: {
+    asset: string;
+    amount: string;
+    direction: 'IN' | 'OUT';
+    operation: string;
+    note: string;
+    priceUsd: string;
+    valueUsd: string;
+    priceEur: string;
+    valueEur: string;
+    from: string;
+    to: string;
+    sender: string | null;
+    receiver: string | null;
+  }[];
+};

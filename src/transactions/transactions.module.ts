@@ -8,5 +8,6 @@ import { AlchemyModule } from 'src/alchemy/alchemy.module';
   providers: [TransactionsService],
   controllers: [TransactionsController],
   imports: [PrismaModule, AlchemyModule],
+  exports: [TransactionsService],
 })
 export class TransactionsModule {}

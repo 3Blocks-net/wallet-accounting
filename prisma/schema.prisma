@@ -15,42 +15,57 @@ datasource db {
 
 
 
+model SyncState {
+  id           String   @id @default(cuid())
+  source       String   @unique
+  lastBlock    String?
+  lastSyncedAt DateTime @default(now()) @updatedAt
+}
+
 model Transaction {
-  id             String   @id @default(cuid())
-  source         String   // 'SAFE' | 'BINANCE_DEPOSIT' | 'BINANCE_WITHDRAW'
-  safeAddress    String?
-  binanceType    String?  // 'DEPOSIT' | 'WITHDRAW'
-  txHash         String?  @db.Text
-  fromAddress    String?  @db.Text
-  toAddress      String?  @db.Text
-  assetSymbol    String
-  assetType      String
-  amount         Decimal  @db.Decimal(36, 18)
-  fee            Decimal? @db.Decimal(36, 18)
-  createdAt      DateTime
-  executedAt     DateTime?
-  note           String?  @db.Text
-  matchKey       String?  @db.Text
-  classification TransactionClassification
+  txId       String     @id
+  date       DateTime
+  sourceType String
+  kind       String
 
-  @@index([source])
-  @@index([txHash])
-  @@index([matchKey])
+  network    String
+
+  feeAsset      String?
+  feeAmount     String?
+  priceUsd      String?
+  valueUsd      String?
+  priceEur      String?
+  valueEur      String?
+
+  feePayerAddress String?
+  feePayer        String?
+
+  note       String?
+
+  transfers  Transfer[]
 }
 
-enum TransactionClassification {
-  UMBUCHUNG
-  EINZAHLUNG
-  AUSZAHLUNG
-  UNBEKANNT
-}
+model Transfer {
+  id            String @id @default(cuid())
+  asset         String
+  amount        String
+  from          String
+  sender        String?
+  to            String
+  receiver      String?
 
-model WalletBalance {
-  id          String   @id @default(cuid())
-  wallet      String
-  assetSymbol String
-  balance     Decimal  @db.Decimal(36, 18)
-  asOf        DateTime
+  direction     String
 
-  @@unique([wallet, assetSymbol, asOf])
+  operation     String?
+  note          String?
+
+  priceUsd      String
+  valueUsd      String
+  priceEur      String
+  valueEur      String
+
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [txId], onDelete: Cascade)
+
+  @@unique([transactionId, asset, amount, from, to])
 }
