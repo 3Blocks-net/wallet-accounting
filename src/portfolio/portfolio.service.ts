@@ -1,69 +1,47 @@
 import { Injectable } from '@nestjs/common';
 import { TransactionsService } from 'src/transactions/transactions.service';
+import { SpamTokenService } from 'src/spam-token/spam-token.service';
 import { isInternalAddress } from 'src/transactions/utils/wallets';
 
 @Injectable()
 export class PortfolioService {
-  constructor(private readonly transactionsService: TransactionsService) {}
+  constructor(
+    private readonly transactionsService: TransactionsService,
+    private readonly spamTokenService: SpamTokenService,
+  ) {}
 
-  async calculateBalances(targetDate: Date) {
+  async calculateBalances(targetDate: Date, excludeSpam = false) {
     const balances: Record<string, Record<string, number>> = {};
 
-    const transactions = await this.transactionsService.findAll();
+    const [transactions, spamSymbols] = await Promise.all([
+      this.transactionsService.findAll(),
+      excludeSpam ? this.spamTokenService.getSpamSymbols() : Promise.resolve(new Set<string>()),
+    ]);
 
     for (const tx of transactions) {
       const txDate = new Date(tx.date);
-
-      // nur bis Stichtag
       if (txDate > targetDate) continue;
 
       for (const transfer of tx.transfers) {
+        if (excludeSpam && spamSymbols.has(transfer.asset?.toUpperCase() ?? '')) continue;
+
         const fromWallet = transfer.from.toLowerCase();
         const toWallet = transfer.to.toLowerCase();
-
         const asset = transfer.asset;
         const amount = Number(transfer.amount);
 
         if (fromWallet && isInternalAddress(fromWallet)) {
-          if (!balances[fromWallet]) {
-            balances[fromWallet] = {};
-          }
-
-          if (!balances[fromWallet][asset]) {
-            balances[fromWallet][asset] = 0;
-          }
-
-          balances[fromWallet][asset] -= amount;
+          balances[fromWallet] ??= {};
+          balances[fromWallet][asset] = (balances[fromWallet][asset] ?? 0) - amount;
         }
 
         if (toWallet && isInternalAddress(toWallet)) {
-          if (!balances[toWallet]) {
-            balances[toWallet] = {};
-          }
-
-          if (!balances[toWallet][asset]) {
-            balances[toWallet][asset] = 0;
-          }
-
-          balances[toWallet][asset] += amount;
+          balances[toWallet] ??= {};
+          balances[toWallet][asset] = (balances[toWallet][asset] ?? 0) + amount;
         }
       }
     }
 
     return balances;
-  }
-
-  // 🔑 Wichtig: Wallet bestimmen
-  private getWalletFromTransfer(transfer: any): string | null {
-    // Beispiel:
-    if (transfer.to === 'BINANCE_WALLET') {
-      return 'BINANCE_WALLET';
-    }
-
-    if (transfer.from === 'BINANCE_WALLET') {
-      return 'BINANCE_WALLET';
-    }
-
-    return null;
   }
 }

@@ -1,6 +1,7 @@
 // src/transactions/transactions.service.ts
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SpamTokenService } from '../spam-token/spam-token.service';
 import { AggregatedTx, RawRow } from './types';
 import { getWalletName, isInternalAddress } from './utils/wallets';
 import { Transaction } from '@prisma/client';
@@ -14,7 +15,10 @@ function buildBinanceId(row: RawRow) {
 
 @Injectable()
 export class TransactionsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private spamTokenService: SpamTokenService,
+  ) {}
 
   async transformRawData(rawRows: RawRow[]): Promise<Transaction[]> {
     const map = new Map<string, AggregatedTx>();
@@ -168,28 +172,37 @@ export class TransactionsService {
   }
 
   async findByTxId(txId: string) {
-    return this.prisma.transaction.findUnique({
-      where: { txId },
-      include: {
-        transfers: true,
-      },
-    });
+    const [tx, spamSymbols] = await Promise.all([
+      this.prisma.transaction.findUnique({
+        where: { txId },
+        include: { transfers: true },
+      }),
+      this.spamTokenService.getSpamSymbols(),
+    ]);
+    if (!tx) return null;
+    return this.enrichWithSpam(tx, spamSymbols);
   }
 
   async findAll(kind?: string) {
-    return this.prisma.transaction.findMany({
-      where: kind
-        ? {
-            kind: kind as any,
-          }
-        : {},
-      include: {
-        transfers: true,
-      },
-      orderBy: {
-        date: 'desc',
-      },
-    });
+    const [txs, spamSymbols] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where: kind ? { kind: kind as any } : {},
+        include: { transfers: true },
+        orderBy: { date: 'desc' },
+      }),
+      this.spamTokenService.getSpamSymbols(),
+    ]);
+    return txs.map((tx) => this.enrichWithSpam(tx, spamSymbols));
+  }
+
+  private enrichWithSpam(tx: any, spamSymbols: Set<string>) {
+    return {
+      ...tx,
+      transfers: tx.transfers.map((t: any) => ({
+        ...t,
+        isSpam: spamSymbols.has(t.asset?.toUpperCase() ?? ''),
+      })),
+    };
   }
 
   private async saveTransactions(txs: AggregatedTx[]) {

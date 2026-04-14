@@ -60,6 +60,10 @@ export class SyncService {
     this.running = true;
     this.logger.log('Sync gestartet...');
 
+    // Preiscache zurücksetzen: stellt sicher dass jeder Token seine History
+    // genau einmal pro Sync lädt (inkl. neuer Tagespreise bis heute)
+    this.priceService.resetForSync();
+
     try {
       const rows: RawRow[] = [];
 

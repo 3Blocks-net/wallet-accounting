@@ -7,6 +7,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AlchemyModule } from './alchemy/alchemy.module';
 import { PortfolioModule } from './portfolio/portfolio.module';
 import { SyncModule } from './sync/sync.module';
+import { SpamTokenModule } from './spam-token/spam-token.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SyncModule } from './sync/sync.module';
     AlchemyModule,
     PortfolioModule,
     SyncModule,
+    SpamTokenModule,
   ],
   controllers: [AppController],
   providers: [AppService],

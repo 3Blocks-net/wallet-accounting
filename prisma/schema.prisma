@@ -45,6 +45,21 @@ model Transaction {
   transfers  Transfer[]
 }
 
+model SpamToken {
+  id              String   @id @default(cuid())
+  /// Eindeutiger Schlüssel — entspricht dem Cache-Key im PriceService:
+  /// ERC20:   "bnb-mainnet:0x55d398..."
+  /// Native:  "SYMBOL:ETH"
+  tokenKey        String   @unique
+  status          String   @default("SPAM") // "SPAM" | "WHITELISTED"
+  symbol          String?
+  network         String?
+  contractAddress String?
+  note            String?
+  firstSeenAt     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 model Transfer {
   id            String @id @default(cuid())
   asset         String
