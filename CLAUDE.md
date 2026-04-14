@@ -10,7 +10,7 @@ Internes Buchhaltungs-Tool für alle Krypto-Wallets und den Binance-Account von 
 - Prisma 6 + PostgreSQL
 - Alchemy API (On-Chain-Daten)
 - Binance REST API (Exchange-Daten)
-- CoinGecko API (historische Preise)
+- Alchemy Token Prices API (historische Preise)
 - `@nestjs/schedule` 6 (Cronjob)
 
 ## Modulstruktur
@@ -31,7 +31,7 @@ src/
     alchemy.service.ts       getTransfers(), getLatestBlock()
   binance/                   Binance API Client
     binance.service.ts       syncAll() → Deposits, Withdrawals, Spot-Trades
-  price/                     CoinGecko Preisabfragen
+  price/                     Alchemy Token Prices (historisch, gecacht)
     price.service.ts         getPrice(symbol, date) → {usd, eur}
   sync/                      Orchestrierung + Cronjob
     sync.service.ts          sync() → ruft Alchemy + Binance + Prices auf
@@ -138,11 +138,17 @@ Spot-Trades erzeugen **zwei RawRows** mit demselben `tx_hash = BINANCE_TRADE:{id
 
 ## PriceService (`src/price/price.service.ts`)
 
-- CoinGecko `/coins/{id}/history?date={DD-MM-YYYY}`
-- In-Memory-Cache: Key = `SYMBOL:DD-MM-YYYY`
-- 300ms Delay zwischen Requests (Free-Tier: ~30 req/min)
-- Stablecoins (USDT, USDC, BUSD, DAI, …): hardcoded 1.00 USD / 0.92 EUR
-- Neues Token: Eintrag in `COINGECKO_IDS` in `price.service.ts` ergänzen
+- Alchemy Token Prices API: `GET /prices/v1/{ALCHEMY_API_KEY}/tokens/historical`
+  - Params: `symbol`, `startTime` (Unix s), `endTime` (Unix s), `interval=1d`
+  - Benötigt Growth Plan+ (gleicher ALCHEMY_API_KEY wie für Transfers)
+- **Bulk-Cache-Strategie**: Pro Symbol wird beim ersten Aufruf die gesamte Tagespreishistorie
+  in einem Request geladen (`HISTORY_START = 2025-04-01`). Kein 1-call-per-datum mehr.
+- In-Memory-Cache: Key = `SYMBOL:YYYY-MM-DD` → `{usd, eur}`
+- EUR = USD × `EUR_USD_RATE` (env, default 0.92) — Alchemy liefert nur USD
+- Stablecoins (USDT, USDC, BUSD, DAI, …): hardcoded 1.00 USD / `EUR_USD_RATE` EUR
+- **Spam-Erkennung**: Token ohne Alchemy-Preisdaten → `spamTokens`-Set, Preis = 0, Warn-Log
+- Intraday-Fallback: nächstliegender früherer Tagespreis aus dem Cache
+- Netzwerkfehler → Symbol bleibt aus fetchedSymbols → wird beim nächsten Sync neu versucht
 
 ## SyncService (`src/sync/sync.service.ts`)
 
@@ -167,8 +173,10 @@ Gibt `Record<walletAddress, Record<asset, number>>` zurück.
 2. `POST /sync/trigger` — synct ab Block 0 (kein vorheriger SyncState)
 
 **Neues Token-Symbol für Preise:**
-1. CoinGecko-ID ermitteln (URL: `coingecko.com/en/coins/{id}`)
-2. Eintrag in `COINGECKO_IDS` in `src/price/price.service.ts` ergänzen
+- Kein Konfigurationsaufwand nötig — Alchemy wird automatisch per Symbol abgefragt.
+- Falls kein Preis gefunden: Token erscheint im Log als "potenzieller Spam".
+- Bekanntes Token ohne Alchemy-Support? → Symbol in `STABLECOINS` eintragen oder
+  `EUR_USD_RATE` anpassen.
 
 **Neues Binance Trading Pair:**
 1. `BINANCE_SPOT_PAIRS` in `.env` um das Symbol erweitern

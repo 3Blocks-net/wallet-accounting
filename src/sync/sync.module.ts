@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { SyncService } from './sync.service';
 import { SyncController } from './sync.controller';
 import { AlchemyModule } from '../alchemy/alchemy.module';
+import { BlockExplorerModule } from '../block-explorer/block-explorer.module';
 import { BinanceModule } from '../binance/binance.module';
 import { PriceModule } from '../price/price.module';
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -13,6 +14,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     ScheduleModule.forRoot(),
     PrismaModule,
     AlchemyModule,
+    BlockExplorerModule,
     BinanceModule,
     PriceModule,
     TransactionsModule,

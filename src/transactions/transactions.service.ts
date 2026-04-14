@@ -56,6 +56,19 @@ export class TransactionsService {
                 : getWalletName(row.from_address) || null,
         };
         map.set(key, agg);
+      } else if (!agg.feeAmount && Number(row.fee) > 0) {
+        // Fee aus späterer Row übernehmen — passiert wenn die fee-tragende Row
+        // nicht als erste für diesen Tx-Hash verarbeitet wurde
+        agg.feeAsset = row.fee_asset || null;
+        agg.feeAmount = row.fee;
+        agg.priceUsd = row.price_usd;
+        agg.valueUsd = String(Number(row.fee) * Number(row.price_usd));
+        agg.priceEur = row.price_eur;
+        agg.valueEur = String(Number(row.fee) * Number(row.price_eur));
+        agg.feePayerAddress = isBinance ? 'BINANCE_WALLET' : row.from_address;
+        agg.feePayer = isBinance
+          ? 'BINANCE_WALLET'
+          : getWalletName(row.from_address) || null;
       }
 
       if (Number(row.amount) === 0) continue;

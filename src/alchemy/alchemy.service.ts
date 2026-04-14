@@ -17,6 +17,12 @@ export const NETWORK_NATIVE_TOKEN: Record<AlchemyNetwork, string> = {
   ARBITRUM: 'ETH',
 };
 
+/**
+ * Alchemy unterstützt 'internal' nur für ETH (Ethereum) und MATIC (Polygon).
+ * BSC, Base, Arbitrum → internal transfers werden über BlockExplorerService geholt.
+ */
+const NETWORKS_WITH_INTERNAL_SUPPORT = new Set<AlchemyNetwork>(['POLYGON']);
+
 export interface AlchemyTransfer {
   blockNum: string;
   uniqueId: string;
@@ -27,7 +33,6 @@ export interface AlchemyTransfer {
   asset: string | null;
   category: string;
   rawContract: { value: string; address: string | null; decimal: string };
-  // metadata ist auf manchen Chains (z.B. BSC internal) nicht immer befüllt
   metadata?: { blockTimestamp: string };
 }
 
@@ -35,8 +40,6 @@ export interface AlchemyTransfer {
 export class AlchemyService {
   private readonly logger = new Logger(AlchemyService.name);
   private readonly clients = new Map<AlchemyNetwork, AxiosInstance>();
-
-  // Block-Timestamps cachen um redundante RPC-Calls zu vermeiden
   private readonly blockTimestampCache = new Map<string, Date>();
 
   constructor() {
@@ -62,15 +65,20 @@ export class AlchemyService {
     const transfers: AlchemyTransfer[] = [];
     let pageKey: string | undefined;
 
+    // 'internal' nur für Netzwerke mit Alchemy-Support (aktuell nur POLYGON)
+    const category: string[] = ['external', 'erc20'];
+    if (NETWORKS_WITH_INTERNAL_SUPPORT.has(network)) {
+      category.push('internal');
+    }
+
     do {
       const params: Record<string, unknown> = {
         [direction === 'from' ? 'fromAddress' : 'toAddress']: address,
         fromBlock,
         toBlock: 'latest',
-        // 'internal' erfasst native Coin-Transfers über Smart Contracts (z.B. BNB via DeFi)
-        category: ['external', 'internal', 'erc20'],
+        category,
         withMetadata: true,
-        maxCount: '0x3e8', // 1000 pro Seite
+        maxCount: '0x3e8',
       };
       if (pageKey) params.pageKey = pageKey;
 
@@ -93,7 +101,7 @@ export class AlchemyService {
     } while (pageKey);
 
     this.logger.log(
-      `[${network}] ${direction}=${address}: ${transfers.length} Transfers gefunden`,
+      `[${network}] ${direction}=${address}: ${transfers.length} Transfers (Alchemy)`,
     );
     return transfers;
   }
@@ -109,9 +117,8 @@ export class AlchemyService {
   }
 
   /**
-   * Block-Timestamp via RPC abrufen.
-   * Fallback wenn metadata.blockTimestamp in alchemy_getAssetTransfers fehlt
-   * (passiert auf BSC bei internal transfers).
+   * Block-Timestamp via RPC — Fallback wenn metadata.blockTimestamp fehlt.
+   * Gecacht pro Block um redundante RPC-Calls zu vermeiden.
    */
   async getBlockTimestamp(network: AlchemyNetwork, blockHex: string): Promise<Date> {
     const cacheKey = `${network}:${blockHex}`;
