@@ -13,8 +13,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
-
 model SyncState {
   id           String   @id @default(cuid())
   source       String   @unique
@@ -23,26 +21,27 @@ model SyncState {
 }
 
 model Transaction {
-  txId       String     @id
+  txId       String   @id
   date       DateTime
   sourceType String
   kind       String
 
-  network    String
+  network String
 
-  feeAsset      String?
-  feeAmount     String?
-  priceUsd      String?
-  valueUsd      String?
-  priceEur      String?
-  valueEur      String?
+  feeAsset  String?
+  feeAmount String?
+  priceUsd  String?
+  valueUsd  String?
+  priceEur  String?
+  valueEur  String?
 
   feePayerAddress String?
   feePayer        String?
 
-  note       String?
+  note   String?
+  isSpam Boolean @default(false)
 
-  transfers  Transfer[]
+  transfers Transfer[]
 }
 
 model SpamToken {
@@ -60,24 +59,33 @@ model SpamToken {
   updatedAt       DateTime @updatedAt
 }
 
+model TokenPrice {
+  tokenKey String
+  date     String  // "YYYY-MM-DD"
+  priceUsd Float
+
+  @@id([tokenKey, date])
+}
+
 model Transfer {
-  id            String @id @default(cuid())
-  asset         String
-  amount        String
-  from          String
-  sender        String?
-  to            String
-  receiver      String?
+  id       String  @id @default(cuid())
+  asset    String
+  amount   String
+  from     String
+  sender   String?
+  to       String
+  receiver String?
 
-  direction     String
+  direction    String
+  tokenAddress String?
 
-  operation     String?
-  note          String?
+  operation String?
+  note      String?
 
-  priceUsd      String
-  valueUsd      String
-  priceEur      String
-  valueEur      String
+  priceUsd String
+  valueUsd String
+  priceEur String
+  valueEur String
 
   transactionId String
   transaction   Transaction @relation(fields: [transactionId], references: [txId], onDelete: Cascade)

@@ -1,58 +1,28 @@
-// src/transactions/transactions.controller.ts
-import {
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-  UploadedFile,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import * as csvParser from 'csv-parser';
-import { ApiConsumes, ApiBody } from '@nestjs/swagger';
-import { createReadStream } from 'fs';
-import { Readable } from 'stream';
+import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
-import { RawRow } from './types';
-import { parse } from 'csv-parse/sync';
 
 @Controller('transactions')
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
-  @Post('import')
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        file: {
-          type: 'string',
-          format: 'binary',
-        },
-      },
+  @Patch(':txId')
+  async updateTransaction(
+    @Param('txId') txId: string,
+    @Body() body: {
+      kind?: string;
+      note?: string;
+      isSpam?: boolean;
+      feeAsset?: string;
+      feeAmount?: string;
+      feePayerAddress?: string;
+      feePayer?: string;
+      priceUsd?: string;
+      valueUsd?: string;
+      priceEur?: string;
+      valueEur?: string;
     },
-  })
-  @UseInterceptors(FileInterceptor('file'))
-  async import(@UploadedFile() file: Express.Multer.File) {
-    if (!file) {
-      throw new Error('Keine Datei hochgeladen');
-    }
-    const text = file.buffer.toString('utf8');
-    // CSV synchron parsen
-    let rows: RawRow[] = [];
-    try {
-      rows = parse(text, {
-        columns: true, // erste Zeile = Header
-        skip_empty_lines: true, // leere Zeilen überspringen
-        bom: true,
-      }) as RawRow[];
-    } catch (err) {
-      throw new Error(`Fehler beim Parsen der CSV: ${(err as Error).message}`);
-    }
-
-    return this.transactionsService.transformRawData(rows);
+  ) {
+    return this.transactionsService.updateTransaction(txId, body);
   }
 
   @Get(':txId')
@@ -61,7 +31,21 @@ export class TransactionsController {
   }
 
   @Get()
-  async getTransactions(@Query('kind') kind?: string) {
-    return this.transactionsService.findAll(kind);
+  async getTransactions(
+    @Query('kind') kind?: string,
+    @Query('network') network?: string,
+    @Query('sourceType') sourceType?: string,
+    @Query('asset') asset?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.transactionsService.findAll({
+      kind,
+      network,
+      sourceType,
+      asset,
+      dateFrom,
+      dateTo,
+    });
   }
 }

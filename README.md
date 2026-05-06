@@ -4,19 +4,21 @@ Internes Buchhaltungs-Tool für alle Krypto-Wallets und den Binance-Account von 
 
 ## Funktionsumfang
 
-- Automatischer täglicher Sync aller On-Chain-Wallets (Polygon, BSC, Base, Arbitrum) via Alchemy
+- Automatischer täglicher Sync aller On-Chain-Wallets (Polygon, BSC, Base, Arbitrum) via Moralis
+- Gas-Fees werden automatisch pro Transaktion berechnet (`receipt_gas_used × gas_price`)
 - Automatischer Sync des Binance-Accounts (Deposits, Withdrawals, Spot-Trades)
-- Historische Preisermittlung in USD und EUR via CoinGecko
+- Historische Preisermittlung in USD und EUR via Alchemy Token Prices API
 - Klassifizierung jeder Transaktion: `PAYMENT_IN`, `PAYMENT_OUT`, `INTERNAL`, `SWAP`
+- Manuelle Nachkorrektur von Transaktionen per API
 - Saldo-Abfrage pro Wallet und Asset zu jedem Datum
-- Manueller Import via CSV als Fallback
 
 ## Voraussetzungen
 
 - Node.js >= 18
 - PostgreSQL
-- Alchemy API Key (ein Key deckt alle 4 Netzwerke ab)
-- Binance API Key mit Lesezugriff (sobald vorhanden)
+- Moralis API Key (Pro Plan — für On-Chain Wallet History)
+- Alchemy API Key (Growth Plan+ — nur für Token Prices, nicht für Transfers)
+- Binance API Key mit Lesezugriff
 
 ## Setup
 
@@ -37,8 +39,12 @@ npm run start:dev
 # Datenbank
 DATABASE_URL="postgresql://user:pass@localhost:5432/wallet_accounting"
 
-# Alchemy — ein Key für alle Netzwerke (Polygon, BSC, Base, Arbitrum)
+# Alchemy — nur für Token Prices API (Growth Plan+), nicht für Transfers
 ALCHEMY_API_KEY=""
+
+# Moralis — On-Chain Wallet History für alle EVM-Chains (Pro Plan erforderlich)
+# Registrieren: https://moralis.io
+MORALIS_API_KEY=""
 
 # Binance — nur Lesezugriff benötigt (Spot + Transfers)
 BINANCE_API_KEY=""
@@ -48,9 +54,8 @@ BINANCE_SECRET_KEY=""
 # Alle Pairs die jemals gehandelt wurden müssen hier stehen
 BINANCE_SPOT_PAIRS="ETHUSDT,BNBUSDT,BTCUSDT,USDCUSDT,MATICUSDT,ARBUSDT"
 
-# CoinGecko Demo-Key (optional, erhöht Rate-Limit)
-# Kostenlos registrieren: https://www.coingecko.com/en/api/pricing
-COINGECKO_API_KEY=""
+# EUR/USD-Näherungswert (Alchemy liefert nur USD)
+EUR_USD_RATE="0.92"
 ```
 
 ## API-Endpunkte
@@ -69,9 +74,26 @@ Der automatische Sync läuft täglich um **02:00 Uhr**.
 |---|---|---|
 | `GET` | `/transactions` | Alle Transaktionen (optional: `?kind=SWAP`) |
 | `GET` | `/transactions/:txId` | Einzelne Transaktion mit allen Transfers |
-| `POST` | `/transactions/import` | CSV-Datei importieren |
+| `PATCH` | `/transactions/:txId` | Transaktion nachkorrigieren |
 
 **Verfügbare `kind`-Filter:** `PAYMENT_IN`, `PAYMENT_OUT`, `INTERNAL`, `SWAP`
+
+**PATCH — editierbare Felder** (alle optional):
+
+```json
+{
+  "kind": "PAYMENT_OUT",
+  "note": "Gehalt März",
+  "feeAsset": "BNB",
+  "feeAmount": "0.0012",
+  "feePayerAddress": "0x...",
+  "feePayer": "3blocks Multisig",
+  "priceUsd": "580",
+  "valueUsd": "0.696",
+  "priceEur": "534",
+  "valueEur": "0.640"
+}
+```
 
 ### Portfolio / Saldo
 
@@ -92,18 +114,8 @@ Der automatische Sync läuft täglich um **02:00 Uhr**.
 
 Die Wallet-Adressen und ihre Namen sind in `src/transactions/utils/wallets.ts` hinterlegt. Neue Wallets dort eintragen — sie werden beim nächsten Sync automatisch berücksichtigt.
 
-## CSV-Import
-
-Als Alternative zum automatischen Sync kann eine CSV-Datei hochgeladen werden. Das Format:
-
-```
-date,wallet_address,source_type,direction,asset,amount,fee,fee_asset,price_usd,value_usd,price_eur,value_eur,network,from_address,to_address,tx_hash,operation,note
-```
-
-`source_type` beginnt mit `TYPE_BINANCE` für Binance-Einträge, sonst z.B. `TYPE_POLYGON`.
-
 ## Hinweise
 
-- Gas-Gebühren für On-Chain-Transaktionen werden aktuell nicht erfasst (stehen auf 0). Das lässt sich mit `eth_getTransactionReceipt` nachrüsten.
-- Für Stablecoins (USDT, USDC, etc.) wird 1 USD / 0.92 EUR als Näherungswert verwendet.
-- Neue Token-Symbole ohne CoinGecko-Mapping werden mit Preis 0 gespeichert und in den Logs gewarnt. Mapping in `src/price/price.service.ts` erweitern.
+- Für Stablecoins (USDT, USDC, etc.) wird 1 USD / `EUR_USD_RATE` EUR als Näherungswert verwendet.
+- Neue Token-Symbole ohne Alchemy-Preis-Mapping werden mit Preis 0 gespeichert und in den Logs gewarnt. Als Spam markierte Token können über `/spam-tokens` verwaltet werden.
+- Nach dem ersten Start mit einem neuen `MORALIS_API_KEY` werden alle Transaktionen ab Firmengründung (Mai 2025) nachgeladen.

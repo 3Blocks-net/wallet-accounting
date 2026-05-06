@@ -2,7 +2,7 @@
 
 ## Zweck
 
-Internes Buchhaltungs-Tool für alle Krypto-Wallets und den Binance-Account von 3blocks (gegründet Mai 2025). Erfasst Transaktionen on-chain (Alchemy) und auf Binance automatisch, klassifiziert sie (PAYMENT_IN / PAYMENT_OUT / SWAP / INTERNAL) und berechnet historische Salden zu beliebigen Stichtagen.
+Internes Buchhaltungs-Tool für alle Krypto-Wallets und den Binance-Account von 3blocks (gegründet Mai 2025). Erfasst Transaktionen on-chain (Moralis) und auf Binance automatisch, klassifiziert sie (PAYMENT_IN / PAYMENT_OUT / SWAP / INTERNAL) und berechnet historische Salden zu beliebigen Stichtagen.
 
 ---
 
@@ -10,9 +10,8 @@ Internes Buchhaltungs-Tool für alle Krypto-Wallets und den Binance-Account von 
 
 - **NestJS 11** + TypeScript
 - **Prisma 6** + PostgreSQL
-- **Alchemy API** — On-Chain-Transfers (polygon-mainnet, bnb-mainnet, base-mainnet, arb-mainnet)
+- **Moralis API v2.2** — On-Chain Wallet History (Polygon, BSC, Base, Arbitrum); ersetzt Alchemy-Transfers und Etherscan
 - **Alchemy Token Prices API v1** — historische Tagespreise (Growth Plan+ erforderlich)
-- **Etherscan API V2** — Gas-Fees und interne Transfers (ein Key für alle EVM-Chains)
 - **Binance REST API** — Deposits, Withdrawals, Spot-Trades
 - **`@nestjs/schedule`** — Cronjob täglich 02:00
 
@@ -27,18 +26,17 @@ src/
     prisma.service.ts             PrismaClient-Wrapper
     prisma.module.ts
   transactions/
-    transactions.service.ts       transformRawData(), findAll(), findByTxId()
-    transactions.controller.ts    GET /transactions, GET /transactions/:txId, POST /transactions/import
+    transactions.service.ts       transformRawData(), findAll(), findByTxId(), updateTransaction()
+    transactions.controller.ts    GET /transactions, GET /transactions/:txId,
+                                  PATCH /transactions/:txId
     types/index.ts                RawRow, AggregatedTx
     utils/wallets.ts              INTERNAL_WALLETS, isInternalAddress(), getWalletName()
   portfolio/
     portfolio.service.ts          calculateBalances(date)
     portfolio.controller.ts       GET /portfolio/balances?date=YYYY-MM-DD
-  alchemy/
-    alchemy.service.ts            getTransfers(), getLatestBlock(), getBlockTimestamp()
-  block-explorer/
-    block-explorer.service.ts     getTransactionFees(), getInternalTransfers()
-    block-explorer.module.ts
+  moralis/
+    moralis.service.ts            getWalletHistory() — Transfers, interne Transfers, Fees
+    moralis.module.ts
   binance/
     binance.service.ts            syncAll() → Deposits, Withdrawals, Spot-Trades
   price/
@@ -94,8 +92,8 @@ Transfer
 
 SyncState
   id           String   @id @default(cuid())
-  source       String   @unique     z.B. 'ALCHEMY:BSC:0x123...' | 'BINANCE'
-  lastBlock    String?              letzter verarbeiteter Block (hex)
+  source       String   @unique     z.B. 'MORALIS:BSC:0x123...' | 'BINANCE'
+  lastBlock    String?              (ungenutzt für Moralis — wird nicht befüllt)
   lastSyncedAt DateTime @updatedAt
 ```
 
@@ -103,7 +101,7 @@ SyncState
 
 ## Kern-Pipeline: RawRow → AggregatedTx → DB
 
-Alle Datenquellen (Alchemy, Binance, CSV-Import) normalisieren ihre Daten zu `RawRow[]`. `TransactionsService.transformRawData()` verarbeitet sie dann einheitlich:
+Alle Datenquellen (Moralis, Binance) normalisieren ihre Daten zu `RawRow[]`. `TransactionsService.transformRawData()` verarbeitet sie dann einheitlich:
 
 ```
 RawRow[]  (eine Zeile = eine Seite einer Bewegung)
@@ -128,7 +126,7 @@ type RawRow = {
   amount: string;
   fee: string;
   fee_asset: string;
-  price_usd: string;
+  price_usd: string;      // Fee-Asset-Preis wenn Fee > 0, sonst Transfer-Asset-Preis
   value_usd: string;
   price_eur: string;
   value_eur: string;
@@ -183,41 +181,25 @@ Typ `EXCHANGE` → wird im SyncService für On-Chain-Sync übersprungen (hat eig
 
 ---
 
-## Alchemy (`src/alchemy/alchemy.service.ts`)
+## Moralis (`src/moralis/moralis.service.ts`)
 
-**Netzwerke:** `POLYGON` → `polygon-mainnet`, `BSC` → `bnb-mainnet`, `BASE` → `base-mainnet`, `ARBITRUM` → `arb-mainnet`
+**Endpunkt:** `GET https://deep-index.moralis.io/api/v2.2/wallets/{address}/history`
 
-**Methoden:**
-- `getTransfers(network, address, 'from'|'to', fromBlock)` — paginiert via `pageKey`, Kategorien: `external` + `erc20` (+ `internal` nur für POLYGON)
-- `getLatestBlock(network)` — für SyncState-Update
-- `getBlockTimestamp(network, blockHex)` — gecacht, Fallback wenn `metadata.blockTimestamp` fehlt
+**Netzwerke (Chain-IDs):** `POLYGON → 0x89`, `BSC → 0x38`, `BASE → 0x2105`, `ARBITRUM → 0xa4b1`
 
-**Native Token pro Netzwerk:** `POLYGON→MATIC`, `BSC→BNB`, `BASE→ETH`, `ARBITRUM→ETH`
+**Parameter:**
+- `chain` — Hex Chain-ID
+- `from_date` — ISO-Timestamp für inkrementellen Sync (24h Overlap)
+- `include_internal_transactions: true` — native Coin-Transfers via Smart Contracts (alle Chains)
+- `order: ASC`, `limit: 100`, cursor-basierte Paginierung
+
+**Response pro Transaktion:**
+- `receipt_gas_used × gas_price / 1e18` → Gas-Fee in nativer Einheit
+- `native_transfers[]` — native Coin-Transfers (inkl. internen via `internal_transaction: boolean`)
+- `erc20_transfers[]` — ERC20-Transfers mit `token_address`, `value_formatted`, `possible_spam`
+- `receipt_status === '1'` — nur erfolgreiche Transaktionen werden verarbeitet
 
 **Asset-Normalisierung** (in `sync.service.ts`): `WBNB→BNB`, `WETH→ETH`, `WMATIC→MATIC`, `WPOL→POL`
-
----
-
-## BlockExplorer (`src/block-explorer/block-explorer.service.ts`)
-
-Verwendet **Etherscan API V2** — eine URL für alle Chains, ein API-Key.
-
-```
-https://api.etherscan.io/v2/api?chainid={chainId}&module=account&...&apikey={ETHERSCAN_API_KEY}
-```
-
-| Netzwerk | chainId |
-|----------|---------|
-| POLYGON | 137 |
-| BSC | 56 |
-| BASE | 8453 |
-| ARBITRUM | 42161 |
-
-**Methoden:**
-- `getTransactionFees(network, address, startBlock)` → `Map<txHash, FeeRecord>` — Fee = gasUsed × gasPrice / 1e18 (präzise via BigInt)
-- `getInternalTransfers(network, address, startBlock)` → native Coin-Transfers via Smart Contracts (BSC, BASE, ARBITRUM — POLYGON läuft über Alchemy)
-
-Paginierung: 10.000 Einträge pro Seite, `page=1,2,...` bis Seite < offset.
 
 ---
 
@@ -255,13 +237,9 @@ Paginierung: 10.000 Einträge pro Seite, `page=1,2,...` bis Seite < offset.
 **Ablauf pro Sync:**
 ```
 für jede INTERNAL-Wallet × jedes Netzwerk (POLYGON, BSC, BASE, ARBITRUM):
-  parallel:
-    1. Alchemy outgoing transfers
-    2. Alchemy incoming transfers
-    3. Etherscan V2 Fee-Map (Fees [network] address)
-  optional (BSC, BASE, ARBITRUM):
-    4. Etherscan V2 interne Transfers
-  SyncState.lastBlock aktualisieren
+  1. moralisService.getWalletHistory(network, address, fromDate)
+     → native_transfers + erc20_transfers + interne Transfers + Fees in einem Call
+  SyncState.lastSyncedAt aktualisieren (source: MORALIS:{NETWORK}:{address})
 
 Binance:
   syncAll(lastSyncedAt) → Deposits + Withdrawals + Spot-Trades
@@ -270,9 +248,12 @@ Binance:
 alle RawRows → transactionsService.transformRawData()
 ```
 
+**Fee-Logik:** `receipt_gas_used × gas_price / 1e18` — nur wenn `tx.from_address === wallet` (wir haben Transaktion eingereicht). Wird an die erste relevante Transfer-Zeile des Tx angehängt.
+
+**Preisfelder bei Fee:** Wenn Fee > 0 und Fee-Asset ≠ Transfer-Asset, enthält `price_usd/eur` den Fee-Asset-Preis (für `Transaction.priceUsd/valueUsd`). `TransactionsService` verwendet diesen Wert für die Fee-Bewertung.
+
 **SyncState-Keys:**
-- On-Chain: `ALCHEMY:{NETWORK}:{address}` (lastBlock = hex)
-- Explorer internal: `EXPLORER:{NETWORK}:{address}` (lastBlock = hex)
+- On-Chain: `MORALIS:{NETWORK}:{address}` (lastSyncedAt = Timestamp, 24h Overlap beim nächsten Sync)
 - Binance: `BINANCE` (lastSyncedAt = Timestamp)
 
 ---
@@ -302,19 +283,56 @@ Response: `Record<walletAddress, Record<assetSymbol, number>>`
 
 ---
 
+## API-Endpunkte
+
+### Sync
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `POST` | `/sync/trigger` | Manuellen Sync starten |
+
+### Transaktionen
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `GET` | `/transactions` | Alle Transaktionen (optional: `?kind=SWAP`) |
+| `GET` | `/transactions/:txId` | Einzelne Transaktion mit allen Transfers |
+| `PATCH` | `/transactions/:txId` | Transaktion aktualisieren |
+
+**PATCH-Body** (alle Felder optional):
+```json
+{
+  "kind": "PAYMENT_OUT",
+  "note": "Gehalt März",
+  "feeAsset": "BNB",
+  "feeAmount": "0.0012",
+  "feePayerAddress": "0x...",
+  "feePayer": "3blocks Multisig",
+  "priceUsd": "580",
+  "valueUsd": "0.696",
+  "priceEur": "534",
+  "valueEur": "0.640"
+}
+```
+
+### Portfolio
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `GET` | `/portfolio/balances?date=YYYY-MM-DD` | Saldo aller Wallets zum Stichtag |
+
+---
+
 ## Environment Variables (`.env`)
 
 ```bash
 DATABASE_URL="postgresql://..."
 
-ALCHEMY_API_KEY=""         # Für Transfers (v2) UND Token Prices (Growth Plan+)
+ALCHEMY_API_KEY=""         # Nur für Token Prices API (Growth Plan+) — NICHT für Transfers
+
+MORALIS_API_KEY=""         # Für On-Chain Wallet History (Pro Plan erforderlich)
+                           # Registrieren: https://moralis.io
 
 BINANCE_API_KEY=""
 BINANCE_SECRET_KEY=""
 BINANCE_SPOT_PAIRS=""      # Kommagetrennt, z.B. "ETHUSDT,BNBUSDT,BTCUSDT"
-
-ETHERSCAN_API_KEY=""       # Etherscan V2 — ein Key für Polygon/BSC/Base/Arbitrum
-                           # Registrieren: https://etherscan.io/myapikey
 
 EUR_USD_RATE="0.92"        # Näherungswert, da Alchemy nur USD liefert
 ```
@@ -325,7 +343,7 @@ EUR_USD_RATE="0.92"        # Näherungswert, da Alchemy nur USD liefert
 
 **Neue Wallet tracken:**
 1. Adresse (lowercase) in `src/transactions/utils/wallets.ts` → `INTERNAL_WALLETS` eintragen
-2. `POST /sync/trigger` — synct ab Block 0 (kein SyncState vorhanden)
+2. `POST /sync/trigger` — synct ab Firmengründung (kein SyncState vorhanden)
 
 **Neues Binance Trading Pair:**
 1. `BINANCE_SPOT_PAIRS` in `.env` ergänzen
@@ -344,18 +362,23 @@ npx prisma migrate dev --name beschreibung
 
 **Vollständiger Re-Sync einer Wallet** (z.B. nach Schema-Änderung):
 ```sql
-DELETE FROM "SyncState" WHERE source LIKE '%{address}%';
+DELETE FROM "SyncState" WHERE source LIKE 'MORALIS:%{address}%';
 ```
 Dann `POST /sync/trigger`.
+
+**Migration von alten Alchemy/Etherscan SyncState-Einträgen:**
+```sql
+DELETE FROM "SyncState" WHERE source LIKE 'ALCHEMY:%' OR source LIKE 'EXPLORER:%';
+```
 
 ---
 
 ## Bekannte Einschränkungen / TODOs
 
-- **Gas-Fees on-chain = 0** — Alchemy liefert keine `gasUsed`/`gasPrice` in `alchemy_getAssetTransfers`. Etherscan V2 `txlist` wird parallel abgefragt, deckt aber nur Transaktionen ab wo wir `from` sind.
 - **EUR/USD-Rate statisch** — `EUR_USD_RATE` in `.env` muss manuell aktualisiert werden. Gilt für alle Assets einheitlich; kein historischer Tageskurs.
 - **Stablecoin EUR-Rate** — USDT/USDC etc. haben immer `0.92` EUR, unabhängig vom tatsächlichen EUR/USD-Kurs des jeweiligen Tages.
 - **Binance-Kommissionen in BNB** — wenn `commissionAsset` weder base noch quote ist (z.B. BNB-Rabatt-Kommissionen), werden diese ignoriert.
-- **Kein Retry** bei transienten API-Fehlern (Alchemy, Etherscan, Binance). Nächster Sync versucht es erneut.
+- **Kein Retry** bei transienten API-Fehlern (Moralis, Alchemy, Binance). Nächster Sync versucht es erneut.
 - **Alchemy Prices nur USD** — kein historischer EUR/USD-Wechselkurs; EUR ist immer eine Näherung.
 - **Token Prices API** erfordert Alchemy Growth Plan+ — bei Free Tier schlägt `fetchHistoryByAddress` fehl, Tokens bleiben auf Preis 0.
+- **Moralis Pro Plan** erforderlich für `/wallets/{address}/history` (150 CU pro Request).

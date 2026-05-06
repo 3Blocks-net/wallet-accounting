@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
-import { AlchemyService } from './alchemy.service';
+import { AlchemyTransfersService } from './alchemy-transfers.service';
 
 @Module({
-  providers: [AlchemyService],
-  exports: [AlchemyService],
+  providers: [AlchemyTransfersService],
+  exports: [AlchemyTransfersService],
 })
 export class AlchemyModule {}

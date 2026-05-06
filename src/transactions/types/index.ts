@@ -15,6 +15,7 @@ export type RawRow = {
   from_address: string;
   to_address: string;
   tx_hash: string;
+  token_address: string;
   operation: string;
   note: string;
 };
@@ -38,6 +39,7 @@ export type AggregatedTx = {
     asset: string;
     amount: string;
     direction: 'IN' | 'OUT';
+    tokenAddress: string | null;
     operation: string;
     note: string;
     priceUsd: string;

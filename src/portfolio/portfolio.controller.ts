@@ -7,11 +7,12 @@ export class PortfolioController {
 
   @Get('balances')
   async getBalances(
-    @Query('date') date: string,
+    @Query('date') date?: string,
     @Query('excludeSpam') excludeSpam?: string,
   ) {
+    const targetDate = date ? new Date(date) : new Date();
     return this.portfolioService.calculateBalances(
-      new Date(date),
+      targetDate,
       excludeSpam === 'true',
     );
   }

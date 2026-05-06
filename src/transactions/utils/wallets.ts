@@ -25,10 +25,6 @@ export const INTERNAL_WALLETS = new Map<string, WalletInfo>(
       name: 'Treasury',
       type: 'INTERNAL',
     },
-    '0xd4fa4ee93d7d27c1c4be36bfba67183dd4320123': {
-      name: 'Pecunity Deployer',
-      type: 'INTERNAL',
-    },
     '0x8f0121e22d5cd7d310e90ff2fc29097260143262': {
       name: 'Pecunity Developer Acc',
       type: 'INTERNAL',
@@ -57,13 +53,12 @@ export const INTERNAL_WALLETS = new Map<string, WalletInfo>(
       name: 'Binance',
       type: 'EXCHANGE',
     },
+    '0xd4fa4ee93d7d27c1c4be36bfba67183dd4320123': {
+      name: 'Pecunity Deployer',
+      type: 'INTERNAL',
+    },
   }),
 );
-
-// export function isInternalAddress(addr?: string | null) {
-//   if (!addr) return false;
-//   return INTERNAL_WALLETS.has(addr.toLowerCase()) || addr === 'BINANCE_WALLET';
-// }
 
 export function getWalletInfo(addr?: string | null): WalletInfo | null {
   if (!addr) return null;
@@ -72,11 +67,17 @@ export function getWalletInfo(addr?: string | null): WalletInfo | null {
   return INTERNAL_WALLETS.get(key) || null;
 }
 
+const PSEUDO_INTERNAL: Record<string, string> = {
+  binance_wallet: 'Binance',
+  '3blocks_bank': '3blocks Bankkonto',
+};
+
 export function isInternalAddress(addr?: string | null) {
-  const info = getWalletInfo(addr);
-  return info?.type === 'INTERNAL' || addr === 'BINANCE_WALLET';
+  const key = addr?.toLowerCase() ?? '';
+  return getWalletInfo(addr)?.type === 'INTERNAL' || key in PSEUDO_INTERNAL;
 }
 
 export function getWalletName(addr?: string | null) {
-  return getWalletInfo(addr)?.name || null;
+  const key = addr?.toLowerCase() ?? '';
+  return getWalletInfo(addr)?.name ?? PSEUDO_INTERNAL[key] ?? null;
 }

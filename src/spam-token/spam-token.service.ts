@@ -21,15 +21,16 @@ export class SpamTokenService {
   }
 
   /**
-   * Gibt alle als SPAM markierten Asset-Symbole zurück (lowercase).
+   * Gibt alle als SPAM markierten tokenKeys zurück.
+   * Format: "bnb-mainnet:0x..." für ERC20, "SYMBOL:ETH" für native Coins.
    * Wird von TransactionsService und PortfolioService für Filterung genutzt.
    */
-  async getSpamSymbols(): Promise<Set<string>> {
+  async getSpamKeys(): Promise<Set<string>> {
     const entries = await this.prisma.spamToken.findMany({
-      where: { status: 'SPAM', symbol: { not: null } },
-      select: { symbol: true },
+      where: { status: 'SPAM' },
+      select: { tokenKey: true },
     });
-    return new Set(entries.map((e) => e.symbol!.toUpperCase()));
+    return new Set(entries.map((e) => e.tokenKey));
   }
 
   findOne(id: string): Promise<SpamToken | null> {

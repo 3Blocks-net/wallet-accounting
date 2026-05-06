@@ -1,10 +1,16 @@
-// src/transactions/transactions.service.ts
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SpamTokenService } from '../spam-token/spam-token.service';
 import { AggregatedTx, RawRow } from './types';
 import { getWalletName, isInternalAddress } from './utils/wallets';
 import { Transaction } from '@prisma/client';
+
+const NETWORK_TO_ALCHEMY: Record<string, string> = {
+  POLYGON: 'polygon-mainnet',
+  BSC: 'bnb-mainnet',
+  BASE: 'base-mainnet',
+  ARBITRUM: 'arb-mainnet',
+};
 
 function buildBinanceId(row: RawRow) {
   // Kannst du nach Bedarf anpassen (z.B. note kürzen / hash aus note bilden)
@@ -84,6 +90,7 @@ export class TransactionsService {
         priceEur: row.price_eur,
         valueEur: row.value_eur,
         direction: row.direction,
+        tokenAddress: row.token_address || null,
         operation: row.operation || '',
         note: row.note || '',
         from:
@@ -171,96 +178,170 @@ export class TransactionsService {
     });
   }
 
+  async updateTransaction(
+    txId: string,
+    data: {
+      kind?: string;
+      note?: string;
+      isSpam?: boolean;
+      feeAsset?: string;
+      feeAmount?: string;
+      feePayerAddress?: string;
+      feePayer?: string;
+      priceUsd?: string;
+      valueUsd?: string;
+      priceEur?: string;
+      valueEur?: string;
+    },
+  ) {
+    const tx = await this.prisma.transaction.update({
+      where: { txId },
+      data,
+      include: { transfers: true },
+    });
+    const spamKeys = await this.spamTokenService.getSpamKeys();
+    return this.enrichWithSpam(tx, spamKeys);
+  }
+
   async findByTxId(txId: string) {
-    const [tx, spamSymbols] = await Promise.all([
+    const [tx, spamKeys] = await Promise.all([
       this.prisma.transaction.findUnique({
         where: { txId },
         include: { transfers: true },
       }),
-      this.spamTokenService.getSpamSymbols(),
+      this.spamTokenService.getSpamKeys(),
     ]);
     if (!tx) return null;
-    return this.enrichWithSpam(tx, spamSymbols);
+    return this.enrichWithSpam(tx, spamKeys);
   }
 
-  async findAll(kind?: string) {
-    const [txs, spamSymbols] = await Promise.all([
+  async findAll(filters: {
+    kind?: string;
+    network?: string;
+    sourceType?: string;
+    asset?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
+    const where: any = {};
+
+    if (filters.kind) where.kind = filters.kind;
+    if (filters.network) where.network = filters.network;
+    if (filters.sourceType) where.sourceType = filters.sourceType;
+
+    if (filters.dateFrom || filters.dateTo) {
+      where.date = {};
+      if (filters.dateFrom) where.date.gte = new Date(filters.dateFrom);
+      if (filters.dateTo) {
+        const to = new Date(filters.dateTo);
+        to.setUTCHours(23, 59, 59, 999);
+        where.date.lte = to;
+      }
+    }
+
+    if (filters.asset) {
+      where.transfers = {
+        some: { asset: { equals: filters.asset, mode: 'insensitive' } },
+      };
+    }
+
+    const [txs, spamKeys] = await Promise.all([
       this.prisma.transaction.findMany({
-        where: kind ? { kind: kind as any } : {},
+        where,
         include: { transfers: true },
         orderBy: { date: 'desc' },
       }),
-      this.spamTokenService.getSpamSymbols(),
+      this.spamTokenService.getSpamKeys(),
     ]);
-    return txs.map((tx) => this.enrichWithSpam(tx, spamSymbols));
+    return txs.map((tx) => this.enrichWithSpam(tx, spamKeys));
   }
 
-  private enrichWithSpam(tx: any, spamSymbols: Set<string>) {
+  private enrichWithSpam(tx: any, spamKeys: Set<string>) {
     return {
       ...tx,
+      isSpam: tx.isSpam ?? false,
       transfers: tx.transfers.map((t: any) => ({
         ...t,
-        isSpam: spamSymbols.has(t.asset?.toUpperCase() ?? ''),
+        isSpam: this.isTransferSpam(t, tx.network, spamKeys),
       })),
     };
   }
 
+  private isTransferSpam(
+    transfer: any,
+    txNetwork: string,
+    spamKeys: Set<string>,
+  ): boolean {
+    if (transfer.tokenAddress) {
+      const alchemyNet =
+        NETWORK_TO_ALCHEMY[txNetwork?.toUpperCase()] ?? txNetwork;
+      return spamKeys.has(
+        `${alchemyNet}:${transfer.tokenAddress.toLowerCase()}`,
+      );
+    }
+    return spamKeys.has(`SYMBOL:${transfer.asset?.toUpperCase() ?? ''}`);
+  }
+
   private async saveTransactions(txs: AggregatedTx[]) {
-    // for (const tx of txs) {
-    //   // Transaction erstellen falls nicht vorhanden
-    //   const transaction = await this.prisma.transaction.upsert({
-    //     where: { txId: tx.txId },
-    //     update: {}, // nichts überschreiben
-    //     create: {
-    //       txId: tx.txId,
-    //       date: new Date(tx.date),
-    //       sourceType: tx.sourceType,
-    //       kind: tx.kind,
-    //     },
-    //   });
+    const txIds = txs.map((tx) => tx.txId);
 
-    //   // Transfers hinzufügen (keine Duplikate)
-    //   await this.prisma.transfer.createMany({
-    //     data: tx.transfers.map((t) => ({
-    //       asset: t.asset,
-    //       amount: t.amount,
-    //       from: t.from,
-    //       to: t.to,
-    //       direction: t.direction,
-    //       priceUsd: t.priceUsd,
-    //       valueUsd: t.valueUsd,
-    //       priceEur: t.priceEur,
-    //       valueEur: t.valueEur,
-    //       transactionId: transaction.txId,
-    //     })),
-    //     skipDuplicates: true,
-    //   });
-    // }
-
-    const transactionsData = txs.map((tx) => ({
-      txId: tx.txId,
-      date: new Date(tx.date),
-      sourceType: tx.sourceType,
-      kind: tx.kind,
-      network: tx.network,
-      note: tx.note,
-      feeAsset: tx.feeAsset,
-      feeAmount: tx.feeAmount,
-      priceUsd: tx.priceUsd,
-      valueUsd: tx.valueUsd,
-      priceEur: tx.priceEur,
-      valueEur: tx.valueEur,
-      feePayerAddress: tx.feePayerAddress,
-      feePayer: tx.feePayer,
-    }));
-
-    // 1️⃣ Alle Transactions auf einmal speichern
-    await this.prisma.transaction.createMany({
-      data: transactionsData,
-      skipDuplicates: true,
+    // 1️⃣ Herausfinden welche txIds bereits existieren
+    const existing = await this.prisma.transaction.findMany({
+      where: { txId: { in: txIds } },
+      select: { txId: true },
     });
+    const existingIds = new Set(existing.map((t) => t.txId));
 
-    // 2️⃣ Alle Transfers sammeln
+    const newTxs = txs.filter((tx) => !existingIds.has(tx.txId));
+    const existingTxs = txs.filter((tx) => existingIds.has(tx.txId));
+
+    // 2️⃣ Neue Transactions anlegen
+    if (newTxs.length > 0) {
+      await this.prisma.transaction.createMany({
+        data: newTxs.map((tx) => ({
+          txId: tx.txId,
+          date: new Date(tx.date),
+          sourceType: tx.sourceType,
+          kind: tx.kind,
+          network: tx.network,
+          note: tx.note,
+          feeAsset: tx.feeAsset,
+          feeAmount: tx.feeAmount,
+          priceUsd: tx.priceUsd,
+          valueUsd: tx.valueUsd,
+          priceEur: tx.priceEur,
+          valueEur: tx.valueEur,
+          feePayerAddress: tx.feePayerAddress,
+          feePayer: tx.feePayer,
+        })),
+      });
+    }
+
+    // 3️⃣ Bestehende Transactions aktualisieren
+    //    - kind, note: nicht überschreiben (manuell per PATCH gesetzt)
+    //    - priceUsd/valueUsd/priceEur/valueEur: nicht überschreiben (werden durch
+    //      den Preis-Enrichment-Endpoint befüllt, nicht durch den Sync)
+    if (existingTxs.length > 0) {
+      await Promise.all(
+        existingTxs.map((tx) =>
+          this.prisma.transaction.update({
+            where: { txId: tx.txId },
+            data: {
+              date: new Date(tx.date),
+              sourceType: tx.sourceType,
+              network: tx.network,
+              feeAsset: tx.feeAsset,
+              feeAmount: tx.feeAmount,
+              feePayerAddress: tx.feePayerAddress,
+              feePayer: tx.feePayer,
+            },
+          }),
+        ),
+      );
+    }
+
+    // 4️⃣ Transfers hinzufügen — neue werden ergänzt, bestehende (unique constraint)
+    //    bleiben unverändert
     const transfersData = txs.flatMap((tx) =>
       tx.transfers.map((t) => ({
         asset: t.asset,
@@ -272,6 +353,7 @@ export class TransactionsService {
         operation: t.operation,
         receiver: t.receiver,
         direction: t.direction,
+        tokenAddress: t.tokenAddress,
         priceUsd: t.priceUsd,
         valueUsd: t.valueUsd,
         priceEur: t.priceEur,
@@ -280,7 +362,6 @@ export class TransactionsService {
       })),
     );
 
-    // 3️⃣ Alle Transfers auf einmal speichern
     await this.prisma.transfer.createMany({
       data: transfersData,
       skipDuplicates: true,

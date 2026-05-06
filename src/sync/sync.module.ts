@@ -2,22 +2,20 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { SyncService } from './sync.service';
 import { SyncController } from './sync.controller';
-import { AlchemyModule } from '../alchemy/alchemy.module';
-import { BlockExplorerModule } from '../block-explorer/block-explorer.module';
+import { MoralisModule } from '../moralis/moralis.module';
 import { BinanceModule } from '../binance/binance.module';
-import { PriceModule } from '../price/price.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { AlchemyModule } from '../alchemy/alchemy.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     PrismaModule,
-    AlchemyModule,
-    BlockExplorerModule,
+    MoralisModule,
     BinanceModule,
-    PriceModule,
     TransactionsModule,
+    AlchemyModule,
   ],
   providers: [SyncService],
   controllers: [SyncController],
