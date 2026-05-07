@@ -6,12 +6,16 @@ Internes Buchhaltungs-Tool für alle Krypto-Wallets und den Binance-Account von 
 
 ## Verwandte Repos
 
-- **Backend (dieses Repo):** `/Users/dario/Documents/develop/3blocks/api-accounting-3blocks-net`
-- **Frontend (Dashboard):** `/Users/dario/Documents/develop/3blocks/accounting-3blocks-net`
+- **Backend (dieses Repo):** `api-accounting-3blocks-net`
+- **Frontend (Dashboard):** `accounting-3blocks-net`
   - Next.js 16 + React 19 + TanStack Query, einziger Consumer dieser API
-  - Bei UI-/Client-Fragen dort `AGENTS.md` lesen
+  - Bei UI-/Client-Fragen dort `AGENTS.md` im Frontend-Repo lesen
 
-Schema-Änderungen hier (Prisma, DTOs, Controller-Returns) **müssen** im Frontend in `src/types/index.ts` + `src/lib/api.ts` gespiegelt werden.
+Frontend und Backend werden parallel als getrennte Repositories gepflegt und getrennt deployt. Lokale absolute Pfade gehören nicht in Code oder Dokumentation; falls beide Repos lokal nebeneinander liegen, genügt eine relative Orientierung über die Repo-Namen.
+
+Schema-Änderungen hier (Prisma, DTOs, Controller-Returns) **müssen** aktuell im Frontend in `src/types/index.ts` + `src/lib/api.ts` gespiegelt werden. Zielbild: Types/API-Client aus der vorhandenen Swagger/OpenAPI-Spezifikation generieren; siehe `docs/OPENAPI.md` und im Frontend `docs/API_GENERATION.md`.
+
+Deployment-Struktur: siehe `docs/DEPLOYMENT.md`.
 
 ---
 
@@ -292,6 +296,17 @@ alle RawRows → transactionsService.transformRawData()
 - `isInternalAddress(to)` → Betrag addieren
 
 Response: `Record<walletAddress, Record<assetSymbol, number>>`
+
+---
+
+## Swagger / OpenAPI
+
+- UI: `/swagger`
+- JSON: `/swagger-json`
+- Lokal: `http://localhost:3000/swagger-json`
+- Produktion: `https://api.accounting.3blocks.net/swagger-json` (per Traefik Basic Auth geschützt)
+
+Für gute generierte Frontend-Types bei neuen/angepassten Endpoints explizite DTO-Klassen mit `@ApiProperty()` und `@ApiResponse({ type: ... })` bevorzugen.
 
 ---
 

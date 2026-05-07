@@ -1,6 +1,8 @@
-# Wallet Accounting
+# 3blocks Wallet Accounting Backend
 
-Internes Buchhaltungs-Tool für alle Krypto-Wallets und den Binance-Account von 3blocks. Erfasst alle Transaktionen automatisch, klassifiziert sie (Eingang, Ausgang, Swap, interne Umbuchung) und ermöglicht die Abfrage des Saldos zu jedem beliebigen Zeitpunkt.
+API und Datenquelle für das interne 3blocks Wallet Accounting. Das Backend erfasst On-Chain- und Binance-Transaktionen automatisch, klassifiziert sie (`PAYMENT_IN`, `PAYMENT_OUT`, `SWAP`, `INTERNAL`) und berechnet historische Salden zu beliebigen Stichtagen.
+
+Das Frontend liegt im separaten Repo `accounting-3blocks-net`. Frontend und Backend bleiben getrennte Repositories und getrennt deploybar. Deployment-Details stehen in `docs/DEPLOYMENT.md`; Swagger/OpenAPI-Details in `docs/OPENAPI.md`.
 
 ## Funktionsumfang
 
@@ -31,6 +33,19 @@ npm install
 ```bash
 npx prisma migrate dev
 npm run start:dev
+```
+
+Lokale API:
+
+```txt
+http://localhost:3000
+```
+
+Swagger/OpenAPI:
+
+```txt
+http://localhost:3000/swagger
+http://localhost:3000/swagger-json
 ```
 
 ## Umgebungsvariablen
