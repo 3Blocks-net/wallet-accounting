@@ -222,27 +222,111 @@ export class TransactionsService {
     asset?: string;
     dateFrom?: string;
     dateTo?: string;
+    wallet?: string;
+    excludeSpam?: boolean;
+    page?: number;
+    pageSize?: number;
   }) {
-    const where: any = {};
+    const where = this.buildWhere(filters);
 
-    if (filters.kind) where.kind = filters.kind;
-    if (filters.network) where.network = filters.network;
-    if (filters.sourceType) where.sourceType = filters.sourceType;
+    const page = Math.max(1, filters.page ?? 1);
+    const pageSize = Math.min(500, Math.max(1, filters.pageSize ?? 50));
+    const skip = (page - 1) * pageSize;
 
-    if (filters.dateFrom || filters.dateTo) {
-      where.date = {};
-      if (filters.dateFrom) where.date.gte = new Date(filters.dateFrom);
-      if (filters.dateTo) {
-        const to = new Date(filters.dateTo);
-        to.setUTCHours(23, 59, 59, 999);
-        where.date.lte = to;
-      }
+    const [txs, total, spamKeys] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where,
+        include: { transfers: true },
+        orderBy: { date: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.transaction.count({ where }),
+      this.spamTokenService.getSpamKeys(),
+    ]);
+
+    return {
+      data: txs.map((tx) => this.enrichWithSpam(tx, spamKeys)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
+  }
+
+  /**
+   * Aggregierte Statistiken — Total + Counts pro Kind. Akzeptiert dieselben
+   * Filter wie `findAll`, ignoriert aber `kind` (die Aufschlüsselung kommt
+   * gerade aus der Gruppierung) sowie Pagination.
+   */
+  async getStats(filters: {
+    network?: string;
+    sourceType?: string;
+    asset?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    wallet?: string;
+    excludeSpam?: boolean;
+  } = {}) {
+    const where = this.buildWhere(filters);
+
+    const [total, byKindRaw] = await Promise.all([
+      this.prisma.transaction.count({ where }),
+      this.prisma.transaction.groupBy({
+        by: ['kind'],
+        where,
+        _count: { _all: true },
+      }),
+    ]);
+
+    const byKind: Record<string, number> = {
+      PAYMENT_IN: 0,
+      PAYMENT_OUT: 0,
+      INTERNAL: 0,
+      SWAP: 0,
+    };
+    for (const row of byKindRaw) {
+      byKind[row.kind] = row._count._all;
     }
 
-    if (filters.asset) {
-      where.transfers = {
-        some: { asset: { equals: filters.asset, mode: 'insensitive' } },
-      };
+    return { total, byKind };
+  }
+
+  /**
+   * Distinct sender + receiver Namen aus allen Transfers — für den Wallet-
+   * Filter im Frontend. Sortiert alphabetisch, ohne null/leere Strings.
+   */
+  async getWalletNames(): Promise<string[]> {
+    const [senders, receivers] = await Promise.all([
+      this.prisma.transfer.findMany({
+        where: { sender: { not: null } },
+        distinct: ['sender'],
+        select: { sender: true },
+      }),
+      this.prisma.transfer.findMany({
+        where: { receiver: { not: null } },
+        distinct: ['receiver'],
+        select: { receiver: true },
+      }),
+    ]);
+
+    const names = new Set<string>();
+    for (const { sender } of senders) if (sender) names.add(sender);
+    for (const { receiver } of receivers) if (receiver) names.add(receiver);
+    return Array.from(names).sort();
+  }
+
+  /**
+   * Lädt ALLE Transaktionen ohne Pagination — ausschließlich für interne
+   * Aggregations-Use-Cases (z.B. Saldo-Berechnung im PortfolioService).
+   * NICHT über HTTP exposed; öffentliche Liste läuft über `findAll` (paginiert).
+   */
+  async findAllForAggregation(filters: { dateTo?: string } = {}) {
+    const where: any = {};
+    if (filters.dateTo) {
+      const to = new Date(filters.dateTo);
+      to.setUTCHours(23, 59, 59, 999);
+      where.date = { lte: to };
     }
 
     const [txs, spamKeys] = await Promise.all([
@@ -254,6 +338,54 @@ export class TransactionsService {
       this.spamTokenService.getSpamKeys(),
     ]);
     return txs.map((tx) => this.enrichWithSpam(tx, spamKeys));
+  }
+
+  private buildWhere(filters: {
+    kind?: string;
+    network?: string;
+    sourceType?: string;
+    asset?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    wallet?: string;
+    excludeSpam?: boolean;
+  }): any {
+    const where: any = {};
+
+    if (filters.kind) where.kind = filters.kind;
+    if (filters.network) where.network = filters.network;
+    if (filters.sourceType) where.sourceType = filters.sourceType;
+    if (filters.excludeSpam) where.isSpam = false;
+
+    if (filters.dateFrom || filters.dateTo) {
+      where.date = {};
+      if (filters.dateFrom) where.date.gte = new Date(filters.dateFrom);
+      if (filters.dateTo) {
+        const to = new Date(filters.dateTo);
+        to.setUTCHours(23, 59, 59, 999);
+        where.date.lte = to;
+      }
+    }
+
+    // Mehrere Transfer-bezogene Filter über AND zusammenführen, damit jeder
+    // Filter eigenständig matched (asset auf einem Transfer, wallet ggf. auf
+    // einem anderen Transfer derselben Transaktion).
+    const transferFilters: any[] = [];
+    if (filters.asset) {
+      transferFilters.push({ asset: { equals: filters.asset, mode: 'insensitive' } });
+    }
+    if (filters.wallet) {
+      transferFilters.push({
+        OR: [{ sender: filters.wallet }, { receiver: filters.wallet }],
+      });
+    }
+    if (transferFilters.length === 1) {
+      where.transfers = { some: transferFilters[0] };
+    } else if (transferFilters.length > 1) {
+      where.AND = transferFilters.map((tf) => ({ transfers: { some: tf } }));
+    }
+
+    return where;
   }
 
   private enrichWithSpam(tx: any, spamKeys: Set<string>) {

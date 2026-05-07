@@ -4,6 +4,19 @@ import { PrismaService } from '../prisma/prisma.service';
 
 export type SpamStatus = 'SPAM' | 'WHITELISTED';
 
+const NETWORK_TO_ALCHEMY: Record<string, string> = {
+  POLYGON: 'polygon-mainnet',
+  BSC: 'bnb-mainnet',
+  BASE: 'base-mainnet',
+  ARBITRUM: 'arb-mainnet',
+};
+
+export interface TokenIdentifier {
+  network: string;
+  asset: string;
+  tokenAddress?: string | null;
+}
+
 @Injectable()
 export class SpamTokenService {
   private readonly logger = new Logger(SpamTokenService.name);
@@ -118,5 +131,62 @@ export class SpamTokenService {
     await this.prisma.spamToken.deleteMany({
       where: { tokenKey, status: 'SPAM' },
     });
+  }
+
+  /**
+   * Setzt den Status eines Tokens via Transfer-Identität (network + asset
+   * + optional tokenAddress). Upsert: legt Record an, falls nicht existent.
+   * Wird vom Frontend aus den Transfer-Detail-Aktionen aufgerufen.
+   */
+  async setStatusByToken(
+    input: TokenIdentifier,
+    status: SpamStatus,
+    note?: string,
+  ): Promise<SpamToken> {
+    const tokenKey = this.resolveTokenKey(input);
+    const meta = this.buildMeta(input);
+
+    const result = await this.prisma.spamToken.upsert({
+      where: { tokenKey },
+      update: { status, ...(note !== undefined ? { note } : {}) },
+      create: {
+        tokenKey,
+        status,
+        symbol: meta.symbol,
+        network: meta.network,
+        contractAddress: meta.contractAddress,
+        note: note ?? null,
+      },
+    });
+
+    this.logger.log(
+      `Token-Status manuell gesetzt: ${tokenKey} → ${status}` +
+        (input.asset ? ` (${input.asset})` : ''),
+    );
+    return result;
+  }
+
+  private resolveTokenKey(input: TokenIdentifier): string {
+    if (input.tokenAddress) {
+      const alchemyNet =
+        NETWORK_TO_ALCHEMY[input.network?.toUpperCase()] ?? input.network;
+      return `${alchemyNet}:${input.tokenAddress.toLowerCase()}`;
+    }
+    return `SYMBOL:${input.asset?.toUpperCase() ?? ''}`;
+  }
+
+  private buildMeta(input: TokenIdentifier) {
+    if (input.tokenAddress) {
+      return {
+        symbol: input.asset || null,
+        network: NETWORK_TO_ALCHEMY[input.network?.toUpperCase()] ?? input.network,
+        contractAddress: input.tokenAddress.toLowerCase(),
+      };
+    }
+    return {
+      symbol: input.asset?.toUpperCase() ?? null,
+      network: null,
+      contractAddress: null,
+    };
   }
 }

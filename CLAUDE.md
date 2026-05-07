@@ -4,6 +4,15 @@
 
 Internes Buchhaltungs-Tool für alle Krypto-Wallets und den Binance-Account von 3blocks (gegründet Mai 2025). Erfasst Transaktionen on-chain (Moralis) und auf Binance automatisch, klassifiziert sie (PAYMENT_IN / PAYMENT_OUT / SWAP / INTERNAL) und berechnet historische Salden zu beliebigen Stichtagen.
 
+## Verwandte Repos
+
+- **Backend (dieses Repo):** `/Users/dario/Documents/develop/3blocks/api-accounting-3blocks-net`
+- **Frontend (Dashboard):** `/Users/dario/Documents/develop/3blocks/accounting-3blocks-net`
+  - Next.js 16 + React 19 + TanStack Query, einziger Consumer dieser API
+  - Bei UI-/Client-Fragen dort `AGENTS.md` lesen
+
+Schema-Änderungen hier (Prisma, DTOs, Controller-Returns) **müssen** im Frontend in `src/types/index.ts` + `src/lib/api.ts` gespiegelt werden.
+
 ---
 
 ## Tech-Stack
@@ -27,7 +36,10 @@ src/
     prisma.module.ts
   transactions/
     transactions.service.ts       transformRawData(), findAll(), findByTxId(), updateTransaction()
-    transactions.controller.ts    GET /transactions, GET /transactions/:txId,
+    transactions.controller.ts    GET /transactions (paginiert),
+                                  GET /transactions/stats,
+                                  GET /transactions/wallets,
+                                  GET /transactions/:txId,
                                   PATCH /transactions/:txId
     types/index.ts                RawRow, AggregatedTx
     utils/wallets.ts              INTERNAL_WALLETS, isInternalAddress(), getWalletName()
@@ -293,15 +305,57 @@ Response: `Record<walletAddress, Record<assetSymbol, number>>`
 ### Transaktionen
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/transactions` | Alle Transaktionen (optional: `?kind=SWAP`) |
+| `GET` | `/transactions` | Paginierte Liste (siehe unten) |
+| `GET` | `/transactions/stats` | Aggregat: `{ total, byKind }` |
+| `GET` | `/transactions/wallets` | Distinct Wallet-Namen (für Filter-UI) |
 | `GET` | `/transactions/:txId` | Einzelne Transaktion mit allen Transfers |
 | `PATCH` | `/transactions/:txId` | Transaktion aktualisieren |
+
+**`GET /transactions` — Query-Params** (alle optional):
+
+| Param | Typ | Default | Beschreibung |
+|---|---|---|---|
+| `kind` | `PAYMENT_IN \| PAYMENT_OUT \| INTERNAL \| SWAP` | — | Tx-Klassifizierung |
+| `network` | string | — | `BSC`, `POLYGON`, … |
+| `sourceType` | string | — | `TYPE_BSC`, `TYPE_BINANCE_TRADE`, … |
+| `asset` | string | — | Symbol, case-insensitive (matched min. einen Transfer) |
+| `wallet` | string | — | Wallet-Name (matched Transfer als sender oder receiver) |
+| `dateFrom` | `YYYY-MM-DD` | — | inklusiv |
+| `dateTo` | `YYYY-MM-DD` | — | inklusiv |
+| `excludeSpam` | boolean | `false` | filtert `Transaction.isSpam = true` raus |
+| `page` | int ≥ 1 | `1` | 1-basierte Seitenzahl |
+| `pageSize` | int 1–500 | `50` | Einträge pro Seite |
+
+**Response:**
+```json
+{
+  "data": [/* Transaction mit transfers[] und enrichtem isSpam */],
+  "total": 1234,
+  "page": 1,
+  "pageSize": 50,
+  "totalPages": 25
+}
+```
+
+`asset` und `wallet` werden über `AND`-verbundene `transfers.some`-Klauseln umgesetzt — die Bedingungen können auf unterschiedlichen Transfers derselben Tx matchen.
+
+**`GET /transactions/stats`** akzeptiert dieselben Filter wie `/transactions` außer `kind` und Pagination. Response:
+```json
+{ "total": 1234, "byKind": { "PAYMENT_IN": 100, "PAYMENT_OUT": 200, "INTERNAL": 50, "SWAP": 884 } }
+```
+
+**`GET /transactions/wallets`** liefert ein sortiertes `string[]` (distinct sender + receiver aus allen Transfers). Wird vom Frontend für das Wallet-Dropdown gebraucht.
+
+**Routing-Hinweis:** `/stats` und `/wallets` müssen im Controller **vor** `@Get(':txId')` deklariert sein, sonst werden sie als `txId`-Param interpretiert (NestJS matched in Deklarations-Reihenfolge).
+
+**Interne Aggregation (`findAllForAggregation`):** Nicht über HTTP exposed. Wird nur vom `PortfolioService` genutzt, um Salden ohne Pagination zu berechnen. Akzeptiert nur `dateTo` als Cutoff. Öffentliche Liste **immer** über `findAll` (paginiert).
 
 **PATCH-Body** (alle Felder optional):
 ```json
 {
   "kind": "PAYMENT_OUT",
   "note": "Gehalt März",
+  "isSpam": true,
   "feeAsset": "BNB",
   "feeAmount": "0.0012",
   "feePayerAddress": "0x...",
