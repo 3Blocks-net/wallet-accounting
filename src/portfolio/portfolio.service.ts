@@ -14,7 +14,9 @@ export class PortfolioService {
     const ceiling = new Date(targetDate);
     ceiling.setUTCHours(23, 59, 59, 999);
 
-    const transactions = await this.transactionsService.findAll({});
+    const transactions = await this.transactionsService.findAllForAggregation({
+      dateTo: ceiling.toISOString(),
+    });
 
     for (const tx of transactions) {
       const txDate = new Date(tx.date);
