@@ -1,12 +1,33 @@
-import { Controller, Post } from '@nestjs/common';
-import { PriceEnrichmentService } from './price-enrichment.service';
+import { Controller, Get, Post } from '@nestjs/common';
+import { PriceFetchService } from './price-fetch.service';
+import { PriceApplyService } from './price-apply.service';
 
 @Controller('prices')
 export class PriceController {
-  constructor(private readonly enrichmentService: PriceEnrichmentService) {}
+  constructor(
+    private readonly fetchService: PriceFetchService,
+    private readonly applyService: PriceApplyService,
+  ) {}
+
+  @Get('missing-tokens')
+  getMissingTokens() {
+    return this.fetchService.getMissingTokens();
+  }
+
+  @Post('fetch')
+  fetchPrices() {
+    return this.fetchService.fetchMissingPrices();
+  }
+
+  @Post('apply')
+  applyPrices() {
+    return this.applyService.applyAll();
+  }
 
   @Post('enrich')
   async enrich() {
-    return this.enrichmentService.enrichAll();
+    const fetchResult = await this.fetchService.fetchMissingPrices();
+    const applyResult = await this.applyService.applyAll();
+    return { ...fetchResult, ...applyResult };
   }
 }
