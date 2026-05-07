@@ -12,6 +12,48 @@ const NETWORK_TO_ALCHEMY: Record<string, string> = {
   ARBITRUM: 'arb-mainnet',
 };
 
+const ACCOUNTING_TIME_ZONE = 'Europe/Berlin';
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]),
+  );
+
+  const zonedAsUtc = Date.UTC(
+    values.year,
+    values.month - 1,
+    values.day,
+    values.hour,
+    values.minute,
+    values.second,
+    date.getUTCMilliseconds(),
+  );
+
+  return zonedAsUtc - date.getTime();
+}
+
+function zonedDateTimeToUtc(
+  date: string,
+  time: '00:00:00.000' | '23:59:59.999',
+  timeZone = ACCOUNTING_TIME_ZONE,
+) {
+  const utcGuess = new Date(`${date}T${time}Z`);
+  return new Date(utcGuess.getTime() - getTimeZoneOffsetMs(utcGuess, timeZone));
+}
+
 function buildBinanceId(row: RawRow) {
   // Kannst du nach Bedarf anpassen (z.B. note kürzen / hash aus note bilden)
   return row.tx_hash === ''
@@ -359,11 +401,11 @@ export class TransactionsService {
 
     if (filters.dateFrom || filters.dateTo) {
       where.date = {};
-      if (filters.dateFrom) where.date.gte = new Date(filters.dateFrom);
+      if (filters.dateFrom) {
+        where.date.gte = zonedDateTimeToUtc(filters.dateFrom, '00:00:00.000');
+      }
       if (filters.dateTo) {
-        const to = new Date(filters.dateTo);
-        to.setUTCHours(23, 59, 59, 999);
-        where.date.lte = to;
+        where.date.lte = zonedDateTimeToUtc(filters.dateTo, '23:59:59.999');
       }
     }
 
