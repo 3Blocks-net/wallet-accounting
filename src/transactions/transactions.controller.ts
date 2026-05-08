@@ -15,6 +15,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Roles } from '../auth/auth.decorators';
 import { TransactionsService } from './transactions.service';
 
 @ApiTags('transactions')
@@ -23,6 +24,7 @@ export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
   @Patch(':txId')
+  @Roles('ADMIN', 'ACCOUNTANT')
   @ApiOperation({ summary: 'Transaktion nachkorrigieren' })
   @ApiResponse({ status: 200, description: 'Aktualisierte Transaktion.' })
   async updateTransaction(

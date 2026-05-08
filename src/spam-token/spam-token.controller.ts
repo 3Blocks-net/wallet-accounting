@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Roles } from '../auth/auth.decorators';
 import { SpamTokenService, SpamStatus } from './spam-token.service';
 
 interface ByTokenBody {
@@ -36,6 +37,7 @@ export class SpamTokenController {
 
   /** PATCH /spam-tokens/by-token/whitelist — Upsert mit status=WHITELISTED */
   @Patch('by-token/whitelist')
+  @Roles('ADMIN', 'ACCOUNTANT')
   @HttpCode(HttpStatus.OK)
   whitelistByToken(@Body() body: ByTokenBody) {
     return this.spamTokenService.setStatusByToken(
@@ -51,6 +53,7 @@ export class SpamTokenController {
 
   /** PATCH /spam-tokens/by-token/spam — Upsert mit status=SPAM */
   @Patch('by-token/spam')
+  @Roles('ADMIN', 'ACCOUNTANT')
   @HttpCode(HttpStatus.OK)
   markByToken(@Body() body: ByTokenBody) {
     return this.spamTokenService.setStatusByToken(
@@ -71,6 +74,7 @@ export class SpamTokenController {
 
   /** PATCH /spam-tokens/:id/whitelist */
   @Patch(':id/whitelist')
+  @Roles('ADMIN', 'ACCOUNTANT')
   @HttpCode(HttpStatus.OK)
   whitelist(
     @Param('id') id: string,
@@ -81,6 +85,7 @@ export class SpamTokenController {
 
   /** PATCH /spam-tokens/:id/spam */
   @Patch(':id/spam')
+  @Roles('ADMIN', 'ACCOUNTANT')
   @HttpCode(HttpStatus.OK)
   remark(@Param('id') id: string) {
     return this.spamTokenService.remark(id);
