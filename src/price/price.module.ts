@@ -1,14 +1,12 @@
 import { Module } from '@nestjs/common';
-import { PriceService } from './price.service';
-import { PriceEnrichmentService } from './price-enrichment.service';
+import { PriceFetchService } from './price-fetch.service';
+import { PriceApplyService } from './price-apply.service';
 import { PriceController } from './price.controller';
-import { SpamTokenModule } from '../spam-token/spam-token.module';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
-  imports: [PrismaModule, SpamTokenModule],
-  providers: [PriceService, PriceEnrichmentService],
+  imports: [PrismaModule],
+  providers: [PriceFetchService, PriceApplyService],
   controllers: [PriceController],
-  exports: [PriceService, PriceEnrichmentService],
 })
 export class PriceModule {}
