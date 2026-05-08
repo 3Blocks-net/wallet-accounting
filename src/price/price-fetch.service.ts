@@ -104,16 +104,19 @@ export class PriceFetchService {
     let fetched = 0;
     let spam = 0;
 
-    // Address-based tokens: batch via by-address, then fetch historical per resolved symbol
+    // Address-based tokens: batch via by-address, then fetch historical
     const resolved = await this.resolveAddressBatch(addressTokens, apiKey);
     spam += addressTokens.length - resolved.length;
 
-    for (const { tokenKey, symbol } of resolved) {
-      const count = await this.fetchHistoricalBySymbol(
-        symbol,
-        tokenKey,
-        apiKey,
-      );
+    for (const { tokenKey, symbol, alchemyNetwork, tokenAddress } of resolved) {
+      const count = symbol
+        ? await this.fetchHistoricalBySymbol(symbol, tokenKey, apiKey)
+        : await this.fetchHistoricalByAddress(
+            alchemyNetwork,
+            tokenAddress,
+            tokenKey,
+            apiKey,
+          );
       if (count > 0) fetched++;
       else spam++;
     }
@@ -140,8 +143,20 @@ export class PriceFetchService {
   private async resolveAddressBatch(
     tokens: MissingToken[],
     apiKey: string,
-  ): Promise<Array<{ tokenKey: string; symbol: string }>> {
-    const resolved: Array<{ tokenKey: string; symbol: string }> = [];
+  ): Promise<
+    Array<{
+      tokenKey: string;
+      symbol: string | null;
+      alchemyNetwork: string;
+      tokenAddress: string;
+    }>
+  > {
+    const resolved: Array<{
+      tokenKey: string;
+      symbol: string | null;
+      alchemyNetwork: string;
+      tokenAddress: string;
+    }> = [];
 
     for (let i = 0; i < tokens.length; i += ADDRESS_BATCH_SIZE) {
       const chunk = tokens.slice(i, i + ADDRESS_BATCH_SIZE);
@@ -151,7 +166,6 @@ export class PriceFetchService {
         address: t.tokenAddress!,
       }));
 
-      // Build lookup map: "{alchemyNetwork}:{address}" → MissingToken
       const chunkMap = new Map(
         chunk.map((t) => [
           `${t.alchemyNetwork}:${t.tokenAddress!.toLowerCase()}`,
@@ -183,12 +197,15 @@ export class PriceFetchService {
 
           resolved.push({
             tokenKey: token.tokenKey,
-            symbol: (entry.symbol as string | undefined) ?? token.symbol,
+            // Alchemy does not always return a symbol — fall back to null so
+            // the caller can switch to network+address historical fetch instead.
+            symbol: (entry.symbol as string | undefined) ?? null,
+            alchemyNetwork: token.alchemyNetwork!,
+            tokenAddress: token.tokenAddress!,
           });
         }
       } catch (err) {
         this.logger.error(`by-address batch failed: ${(err as Error).message}`);
-        // Network error — don't mark as spam, retry next call
       }
     }
 
@@ -261,6 +278,71 @@ export class PriceFetchService {
     this.logger.log(
       `[Price] ${symbol} (${tokenKey}): ${prices.length} daily prices saved`,
     );
+    return prices.length;
+  }
+
+  private async fetchHistoricalByAddress(
+    alchemyNetwork: string,
+    tokenAddress: string,
+    tokenKey: string,
+    apiKey: string,
+  ): Promise<number> {
+    const label = `${alchemyNetwork}:${tokenAddress}`;
+    const totalEnd = Math.floor(Date.now() / 1000);
+    const totalStart = await this.getIncrementalStart(tokenKey);
+
+    if (totalStart > totalEnd) {
+      this.logger.log(`[Price] ${label}: already up to date`);
+      return 1;
+    }
+
+    const CHUNK_SECS = HISTORY_CHUNK_DAYS * 24 * 60 * 60;
+    const prices: Array<{ date: string; usd: number }> = [];
+
+    for (let start = totalStart; start <= totalEnd; start += CHUNK_SECS + 1) {
+      const end = Math.min(start + CHUNK_SECS, totalEnd);
+
+      try {
+        const { data } = await axios.post(
+          `${PRICES_BASE}/${apiKey}/tokens/historical`,
+          {
+            network: alchemyNetwork,
+            address: tokenAddress,
+            startTime: start,
+            endTime: end,
+            interval: '1d',
+          },
+          { timeout: 15_000 },
+        );
+
+        for (const point of data?.data ?? []) {
+          const usd = parseFloat(point.value ?? '0');
+          if (!isFinite(usd) || usd <= 0) continue;
+          prices.push({ date: (point.timestamp as string).slice(0, 10), usd });
+        }
+      } catch (err: any) {
+        const status: number | undefined = err?.response?.status;
+        const body = err?.response?.data ?? {};
+        const msg: string =
+          body?.error?.message ?? body?.message ?? JSON.stringify(body);
+        this.logger.warn(`[Price] ${label}: historical ${status} — ${msg}`);
+        await this.markAsSpam(tokenKey, label);
+        return 0;
+      }
+    }
+
+    if (prices.length === 0) {
+      this.logger.warn(`[Price] ${label}: no historical data — marking as spam`);
+      await this.markAsSpam(tokenKey, label);
+      return 0;
+    }
+
+    await this.saveToDb(tokenKey, prices);
+    await this.prisma.spamToken.deleteMany({
+      where: { tokenKey, status: 'SPAM' },
+    });
+
+    this.logger.log(`[Price] ${label}: ${prices.length} daily prices saved`);
     return prices.length;
   }
 
