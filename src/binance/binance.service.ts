@@ -158,11 +158,11 @@ export class BinanceService {
             value_eur: '0',
             network: w.network || 'BINANCE',
             from_address: 'BINANCE_WALLET',
-            to_address: w.address,
+            to_address: 'EXTERNAL',
             tx_hash: w.txId || `BINANCE_WITH:${w.applyTime}:${w.coin}`,
             token_address: '',
             operation: 'WITHDRAWAL',
-            note: '',
+            note: w.address || '',
           });
         }
       } catch (err) {

@@ -38,7 +38,13 @@ export class PortfolioService {
           balances[fromWallet][asset] = { balance: entry.balance - amount, tokenAddress: entry.tokenAddress ?? tokenAddress };
         }
 
-        if (toWallet && isInternalAddress(toWallet)) {
+        // Binance WITHDRAWAL: skip the to-side credit here.
+        // The Binance record debits BINANCE_WALLET; the on-chain Moralis record
+        // independently credits the destination wallet. Counting both would
+        // double-credit the destination wallet for the same movement.
+        const isBinanceWithdrawal = (transfer as any).operation === 'WITHDRAWAL';
+
+        if (toWallet && isInternalAddress(toWallet) && !isBinanceWithdrawal) {
           balances[toWallet] ??= {};
           const entry = balances[toWallet][asset] ?? { balance: 0, tokenAddress };
           balances[toWallet][asset] = { balance: entry.balance + amount, tokenAddress: entry.tokenAddress ?? tokenAddress };
