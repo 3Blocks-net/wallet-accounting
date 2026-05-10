@@ -50,6 +50,17 @@ export class PortfolioService {
           balances[toWallet][asset] = { balance: entry.balance + amount, tokenAddress: entry.tokenAddress ?? tokenAddress };
         }
       }
+
+      // Deduct transaction fee from the fee payer's balance
+      const feeAmount = Number(tx.feeAmount);
+      if (feeAmount > 0 && tx.feeAsset && tx.feePayerAddress) {
+        const feePayer = tx.feePayerAddress.toLowerCase();
+        if (isInternalAddress(feePayer)) {
+          balances[feePayer] ??= {};
+          const entry = balances[feePayer][tx.feeAsset] ?? { balance: 0, tokenAddress: null };
+          balances[feePayer][tx.feeAsset] = { balance: entry.balance - feeAmount, tokenAddress: entry.tokenAddress };
+        }
+      }
     }
 
     return balances;
